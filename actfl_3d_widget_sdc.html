@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ACTFL 3D Proficiency Pyramid – SDC Long Sequence Spanish</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#111a33; --text:#e9eefc; --muted:#a9b6e6;
+    --border:rgba(255,255,255,.12); --shadow:0 20px 60px rgba(0,0,0,.45);
+    --radius:16px; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  html,body{height:100%; margin:0; background: radial-gradient(1200px 800px at 20% 0%, #16265a 0%, var(--bg) 45%, #070a14 100%); color:var(--text); font-family:var(--sans);}
+  .app{display:grid; grid-template-columns: minmax(360px, 1.1fr) minmax(360px, .9fr); gap:16px; height:100%; padding:16px; box-sizing:border-box;}
+  .card{background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden;}
+  .topbar{display:flex; gap:10px; align-items:center; padding:12px; border-bottom:1px solid var(--border); background: rgba(0,0,0,.18); flex-wrap:wrap;}
+  select, button{background: rgba(255,255,255,.06); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:12px; font-size:14px; outline:none;}
+  button{cursor:pointer;} button:hover{background: rgba(255,255,255,.10);}
+  .hint{color:var(--muted); font-size:12px; margin-left:auto;}
+  /* IMPORTANT for Google Sites iframes: avoid 100vh */
+  #stage{height:560px; min-height:460px;}
+  .right{display:flex; flex-direction:column;}
+  .panel{padding:14px;}
+  .h1{font-size:18px; font-weight:700; margin:2px 0 6px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 10px;}
+  .pillrow{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 12px;}
+  .pill{font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background: rgba(255,255,255,.06);}
+  .pill b{font-family:var(--mono); font-weight:700;}
+  .box{background: rgba(0,0,0,.16); border:1px solid var(--border); border-radius:14px; padding:12px; margin-top:10px;}
+  .box h3{margin:0 0 8px; font-size:13px; color:var(--muted); letter-spacing:.02em; text-transform:uppercase;}
+  .desc{line-height:1.45; font-size:14px;}
+  table{width:100%; border-collapse:separate; border-spacing:0; font-size:13px; margin-top:8px;}
+  th, td{padding:10px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:top;}
+  th{color:var(--muted); font-weight:600; text-align:left;}
+  tr:last-child td{border-bottom:none;}
+  .status{font-weight:700;}
+  .muted{color:var(--muted);}
+  .err{padding:10px 12px; margin:12px; border-radius:12px; border:1px solid rgba(255,80,80,.35); background:rgba(255,80,80,.08); color:#ffd8d8; font-size:13px; display:none;}
+  @media (max-width: 980px){ .app{grid-template-columns:1fr; height:auto;} #stage{height:520px;} .hint{margin-left:0; width:100%;} }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="topbar">
+      <select id="modeSelect"></select>
+      <select id="skillSelect"></select>
+      <button id="resetBtn">Reset view</button>
+      <div class="hint">Drag to rotate • Scroll to zoom • Click a slice</div>
+    </div>
+    <div id="err" class="err"></div>
+    <div id="stage"></div>
+  </div>
+
+  <div class="card right">
+    <div class="panel">
+      <div class="h1">ACTFL 3D Proficiency Pyramid</div>
+      <div class="sub">Click a slice to see ACTFL “Full Spectrum” + SDC Long Sequence expectations.</div>
+
+      <div class="pillrow">
+        <div class="pill">Selected: <b id="selCode">—</b></div>
+        <div class="pill">Band: <span id="selBand" class="muted">—</span></div>
+        <div class="pill">Mode: <span id="selMode" class="muted">—</span></div>
+        <div class="pill">Skill: <span id="selSkill" class="muted">—</span></div>
+      </div>
+
+      <div class="box">
+        <h3>ACTFL descriptor</h3>
+        <div class="desc" id="actflDesc">Select a slice to view the descriptor for this mode/skill.</div>
+      </div>
+
+      <div class="box">
+        <h3>SDC Long Sequence expectation by course</h3>
+        <div class="muted" style="font-size:12px; margin-bottom:8px;">
+          Shows where each course/grade is marked 🌱 Entry / 🌿 Target / 🌳 Emerging at the selected slice.
+        </div>
+        <div id="courseTableWrap"></div>
+      </div>
+
+      <div class="box">
+        <h3>Legend</h3>
+        <div class="desc">🌱 <span class="status">Entry</span> • 🌿 <span class="status">Target</span> • 🌳 <span class="status">Emerging</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Prefer "classic" scripts (works better in embedded iframes than type=module) -->
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+(function(){
+  const ERR = document.getElementById("err");
+  function showErr(msg){ ERR.style.display="block"; ERR.textContent = msg; }
+
+  if(!window.THREE) {
+    showErr("Three.js failed to load. This is usually a district content filter blocking unpkg.com. Try a different CDN (cdnjs/jsdelivr) or host three.min.js yourself.");
+    return;
+  }
+  if(!THREE.OrbitControls) {
+    showErr("OrbitControls failed to load. Same fix: try a different CDN or host the file yourself.");
+    return;
+  }
+
+  const DATA = {"modes": {"Interpretive Communication": {"Interpretive Listening \u2013 Full Spectrum": {"descriptors": {"N1": "Recognizes isolated words and memorized phrases with strong contextual support.", "N2": "Understands main ideas and isolated details in short, familiar audio texts.", "N4": "Follows simple spoken messages beyond rehearsed material with partial comprehension.", "I1": "Understands sentence-length spoken language on everyday topics.", "I2": "Understands connected spoken discourse with predictable structure.", "I5": "Understands most conversations on familiar topics, including narration and description.", "A1": "Understands paragraph-length spoken discourse across time frames.", "A2": "Understands detailed spoken texts on personal and public topics.", "A3": "Understands extended discourse with nuance and detail across contexts."}, "grades": {"1st Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "5th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "6th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "7th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "8th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I3": "\ud83c\udf31 Entry", "I4": "\ud83c\udf3f Target", "I5": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I4": "\ud83c\udf31 Entry", "I5": "\ud83c\udf3f Target", "A1": "\ud83c\udf33 Emerging"}}}, "Interpretive Reading \u2013 Full Spectrum": {"descriptors": {"N1": "Identifies familiar words, symbols, and cognates in isolation.", "N2": "Understands short, simple texts on familiar topics using context and visuals.", "N4": "Grasps the gist of short paragraph-length texts when scaffolded.", "I1": "Understands sentence-level texts across everyday contexts.", "I2": "Understands connected texts with organization and supporting detail.", "I5": "Understands narrations and descriptions in familiar genres.", "A1": "Understands paragraph-length texts across time frames.", "A2": "Understands detailed, organized texts on personal and public topics.", "A3": "Understands extended texts with nuance and perspective."}, "grades": {"1st Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "5th Grade": {"N2": "\ud83c\udf31 Entry", "N3": "\ud83c\udf3f Target", "N4": "\ud83c\udf33 Emerging"}, "6th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "7th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "8th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I3": "\ud83c\udf31 Entry", "I4": "\ud83c\udf3f Target", "I5": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I4": "\ud83c\udf31 Entry", "I5": "\ud83c\udf3f Target", "A1": "\ud83c\udf33 Emerging"}}}}, "Interpersonal Communication": {"Interpersonal Oral Interaction \u2013 Full Spectrum": {"descriptors": {"N1": "Exchanges meaning using isolated words and memorized phrases, relying heavily on repetition, gestures, and support. Understanding and responses are limited and often fragmented.", "N2": "Participates in simple, predictable exchanges using short sentences. Understands and responds to direct questions related to self and immediate environment, though interaction is often reactive.", "N4": "Manages uncomplicated conversations by asking and answering simple questions. Begins to recombine language and repair breakdowns, but cannot yet sustain interaction consistently.", "I1": "Creates with language to handle everyday interactions and transactions. Can initiate, maintain, and close simple conversations across familiar contexts.", "I2": "Sustains interaction using strings of sentences. Can exchange information, clarify meaning, and maintain conversations on familiar topics with increased independence.", "I5": "Participates in conversations with emerging narration and description, but performance is not yet consistently paragraph-length.", "A1": "Sustains paragraph-length interaction, narrating and describing in past, present, and future time frames. Can handle situations with a complication.", "A2": "Engages confidently in extended conversations with detail, organization, and clarity, interweaving narration and description.", "A3": "Communicates with ease, precision, and fluency across contexts, adapting language to the interaction and interlocutor."}, "grades": {"1st Grade": {"N1": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "5th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "6th Grade": {"N2": "\ud83c\udf31 Entry", "N3": "\ud83c\udf3f Target", "N4": "\ud83c\udf33 Emerging"}, "7th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "8th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I1": "\ud83c\udf31 Entry", "I2": "\ud83c\udf3f Target", "I3": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}}}, "Interpersonal Written Interaction \u2013 Full Spectrum": {"descriptors": {"N1": "Exchanges meaning by copying or reproducing familiar words and phrases. Relies heavily on models and may switch to another language to maintain interaction.", "N2": "Participates in simple written exchanges using short, practiced sentences. Can read and respond to highly predictable messages on familiar topics.", "N4": "Manages basic written interactions by asking and answering simple questions and recombining familiar language, though exchanges remain short and uneven.", "I1": "Creates with language in written exchanges to meet everyday needs. Can maintain back-and-forth communication using connected sentences.", "I2": "Sustains written interaction using strings of sentences, clarifying meaning and exchanging information across familiar contexts.", "I5": "Participates in written exchanges with emerging paragraph-level organization, though breakdowns may occur when complexity increases.", "A1": "Sustains paragraph-length written interaction, narrating and describing across time frames in exchanges.", "A2": "Engages in extended written interaction with detail, cohesion, and clarity, adjusting language to context and audience.", "A3": "Writes interactively with precision, nuance, and stylistic control, maintaining coherent and purposeful exchanges across contexts."}, "grades": {"1st Grade": {"N1": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "5th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "6th Grade": {"N2": "\ud83c\udf31 Entry", "N3": "\ud83c\udf3f Target", "N4": "\ud83c\udf33 Emerging"}, "7th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "8th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"I1": "\ud83c\udf31 Entry", "I2": "\ud83c\udf3f Target", "I3": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I3": "\ud83c\udf31 Entry", "I4": "\ud83c\udf3f Target", "I5": "\ud83c\udf33 Emerging"}}}}, "Presentational Communication": {"Presentational Speaking \u2013 Full Spectrum": {"descriptors": {"N1": "Produces lists and memorized phrases.", "N2": "Presents basic information using short sentences on familiar topics.", "N4": "Produces connected sentences to express personal meaning.", "I1": "Creates with language to present on everyday topics.", "I2": "Sustains organized presentations using sentence strings.", "I5": "Presents with emerging paragraph-level organization.", "A1": "Produces paragraph-length presentations across time frames.", "A2": "Produces detailed, organized presentations on personal and public topics.", "A3": "Presents with clarity, precision, and rhetorical control."}, "grades": {"1st Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "5th Grade": {"N2": "\ud83c\udf31 Entry", "N3": "\ud83c\udf3f Target", "N4": "\ud83c\udf33 Emerging"}, "6th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "7th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "8th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I3": "\ud83c\udf31 Entry", "I4": "\ud83c\udf3f Target", "I5": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I4": "\ud83c\udf31 Entry", "I5": "\ud83c\udf3f Target", "A1": "\ud83c\udf33 Emerging"}}}, "Presentational Writing \u2013 Full Spectrum": {"descriptors": {"N1": "Copies or reproduces words and phrases.", "N2": "Writes simple sentences and short messages on familiar topics.", "N4": "Begins short paragraph-like writing through recombination.", "I1": "Writes connected sentences to communicate meaning.", "I2": "Writes organized texts using sentence strings.", "I5": "Writes with emerging paragraph structure and narration.", "A1": "Writes paragraph-length texts across time frames.", "A2": "Writes detailed, organized texts with cohesion and clarity.", "A3": "Writes with precision, nuance, and stylistic control."}, "grades": {"1st Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "2nd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "3rd Grade": {"N1": "\ud83c\udf3f Target", "N2": "\ud83c\udf33 Emerging"}, "4th Grade": {"N1": "\ud83c\udf31 Entry", "N2": "\ud83c\udf3f Target", "N3": "\ud83c\udf33 Emerging"}, "5th Grade": {"N2": "\ud83c\udf31 Entry", "N3": "\ud83c\udf3f Target", "N4": "\ud83c\udf33 Emerging"}, "6th Grade": {"N3": "\ud83c\udf31 Entry", "N4": "\ud83c\udf3f Target", "I1": "\ud83c\udf33 Emerging"}, "7th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "8th Grade": {"N4": "\ud83c\udf31 Entry", "I1": "\ud83c\udf3f Target", "I2": "\ud83c\udf33 Emerging"}, "Honors Spanish I": {"I2": "\ud83c\udf31 Entry", "I3": "\ud83c\udf3f Target", "I4": "\ud83c\udf33 Emerging"}, "9th Grade Honors": {"I3": "\ud83c\udf31 Entry", "I4": "\ud83c\udf3f Target", "I5": "\ud83c\udf33 Emerging"}, "Honors Spanish II": {"I4": "\ud83c\udf31 Entry", "I5": "\ud83c\udf3f Target", "A1": "\ud83c\udf33 Emerging"}}}}}};
+
+  const CODE_TO_LABEL = {
+    N1:"Novice Low", N2:"Novice Mid", N3:"Novice Mid-High", N4:"Novice High",
+    I1:"Intermediate Low", I2:"Intermediate Mid", I3:"Intermediate Mid-High", I4:"Intermediate High", I5:"Intermediate High+",
+    A1:"Advanced Low", A2:"Advanced Mid", A3:"Advanced High"
+  };
+  const SLICE_ORDER = ["N1","N2","N3","N4","I1","I2","I3","I4","I5","A1","A2","A3"];
+
+  function bandOf(code){
+    if(code.startsWith("N")) return "Novice";
+    if(code.startsWith("I")) return "Intermediate";
+    if(code.startsWith("A")) return "Advanced";
+    return "—";
+  }
+
+  const BAND_COLOR = {
+    Novice: 0x3d7bd6,
+    Intermediate: 0x55b06a,
+    Advanced: 0xe07a2f
+  };
+
+  // UI
+  const modeSelect = document.getElementById("modeSelect");
+  const skillSelect = document.getElementById("skillSelect");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const selCode = document.getElementById("selCode");
+  const selBand = document.getElementById("selBand");
+  const selMode = document.getElementById("selMode");
+  const selSkill = document.getElementById("selSkill");
+  const actflDesc = document.getElementById("actflDesc");
+  const courseTableWrap = document.getElementById("courseTableWrap");
+
+  const modeNames = Object.keys(DATA.modes);
+  modeNames.forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = m; opt.textContent = m;
+    modeSelect.appendChild(opt);
+  });
+
+  function loadSkillsForMode(mode){
+    skillSelect.innerHTML = "";
+    const skills = Object.keys(DATA.modes[mode]);
+    skills.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = s.replace("– Full Spectrum","").replace("– \nFull Spectrum","").trim();
+      skillSelect.appendChild(opt);
+    });
+  }
+
+  let currentMode = modeNames[0];
+  loadSkillsForMode(currentMode);
+  let currentSkill = skillSelect.value;
+
+  modeSelect.addEventListener("change", () => {
+    currentMode = modeSelect.value;
+    loadSkillsForMode(currentMode);
+    currentSkill = skillSelect.value;
+    updateRightPanel(null);
+  });
+
+  skillSelect.addEventListener("change", () => {
+    currentSkill = skillSelect.value;
+    updateRightPanel(null);
+  });
+
+  // THREE setup
+  const stage = document.getElementById("stage");
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b1020, 4, 18);
+
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  stage.appendChild(renderer.domElement);
+
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  camera.position.set(0, 2.6, 8);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 4.2;
+  controls.maxDistance = 14;
+  controls.target.set(0, 0.6, 0);
+
+  resetBtn.addEventListener("click", () => {
+    camera.position.set(0, 2.6, 8);
+    controls.target.set(0, 0.6, 0);
+    controls.update();
+  });
+
+  // Lights
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
+  key.position.set(4, 6, 3);
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+  fill.position.set(-5, 2, -3);
+  scene.add(fill);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+  scene.add(ambient);
+
+  // Ground glow
+  const glowGeom = new THREE.CircleGeometry(3.4, 64);
+  const glowMat = new THREE.MeshBasicMaterial({ color:0x1b2c6b, transparent:true, opacity:0.35 });
+  const glow = new THREE.Mesh(glowGeom, glowMat);
+  glow.rotation.x = -Math.PI/2;
+  glow.position.y = -1.25;
+  scene.add(glow);
+
+  function resize(){
+    const w = stage.clientWidth;
+    const h = stage.clientHeight;
+    if(!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // Build slices
+  const slicesGroup = new THREE.Group();
+  scene.add(slicesGroup);
+
+  const sliceMeshes = [];
+  const totalHeight = 5.2;
+  const sliceHeight = totalHeight / SLICE_ORDER.length;
+  const topRadius = 2.8;
+  const bottomRadius = 0.18;
+
+  function radiusAt(t){ return bottomRadius + (topRadius - bottomRadius) * t; }
+
+  for(let i=0; i<SLICE_ORDER.length; i++) {
+    const code = SLICE_ORDER[i];
+    const t0 = i / SLICE_ORDER.length;
+    const t1 = (i+1) / SLICE_ORDER.length;
+
+    const r0 = radiusAt(t0);
+    const r1 = radiusAt(t1);
+
+    const geom = new THREE.CylinderGeometry(r1, r0, sliceHeight*0.98, 5, 1, false);
+    const band = bandOf(code);
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: BAND_COLOR[band] || 0xffffff,
+      roughness: 0.45,
+      metalness: 0.08,
+      transparent:true,
+      opacity: 0.95
+    });
+
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.userData = { code, band };
+    mesh.position.y = -totalHeight/2 + (i+0.5)*sliceHeight;
+    slicesGroup.add(mesh);
+    sliceMeshes.push(mesh);
+  }
+
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.CylinderGeometry(topRadius, bottomRadius, totalHeight, 5, 1)),
+    new THREE.LineBasicMaterial({ color:0xffffff, transparent:true, opacity:0.10 })
+  );
+  slicesGroup.add(edges);
+  slicesGroup.position.y = 0.8;
+
+  // Interaction
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let hovered = null;
+  let selected = null;
+
+  function setHighlight(mesh, on){
+    if(!mesh) return;
+    mesh.material.opacity = on ? 1.0 : 0.95;
+    mesh.material.roughness = on ? 0.35 : 0.45;
+    mesh.scale.set(1, on ? 1.01 : 1, 1);
+  }
+
+  renderer.domElement.addEventListener("mousemove", (e) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(sliceMeshes, false);
+    const next = hits.length ? hits[0].object : null;
+
+    if(next !== hovered){
+      if(hovered && hovered !== selected) setHighlight(hovered, false);
+      hovered = next;
+      if(hovered && hovered !== selected) setHighlight(hovered, true);
+    }
+  });
+
+  renderer.domElement.addEventListener("click", () => {
+    if(!hovered) return;
+    if(selected && selected !== hovered) setHighlight(selected, false);
+    selected = hovered;
+    setHighlight(selected, true);
+    updateRightPanel(selected.userData.code);
+  });
+
+  function updateRightPanel(code){
+    selMode.textContent = currentMode;
+    selSkill.textContent = currentSkill.replace("– Full Spectrum","").replace("– \nFull Spectrum","").trim();
+
+    if(!code){
+      selCode.textContent = "—";
+      selBand.textContent = "—";
+      actflDesc.textContent = "Select a slice to view the descriptor for this mode/skill.";
+      courseTableWrap.innerHTML = '<div class="muted">No slice selected.</div>';
+      return;
+    }
+
+    selCode.textContent = code + " (" + (CODE_TO_LABEL[code] || code) + ")";
+    selBand.textContent = bandOf(code);
+
+    const skillData = DATA.modes[currentMode][currentSkill];
+    const desc = (skillData.descriptors && skillData.descriptors[code]) ? skillData.descriptors[code] : null;
+    actflDesc.textContent = desc || "No descriptor listed for this slice in the attached framework.";
+
+    const rows = [];
+    Object.entries(skillData.grades).forEach(([grade, statuses]) => {
+      if(statuses && statuses[code]) rows.push([grade, statuses[code]]);
+    });
+
+    if(!rows.length){
+      courseTableWrap.innerHTML = '<div class="muted">No SDC course markers at ' + code + ' for this mode/skill.</div>';
+      return;
+    }
+
+    courseTableWrap.innerHTML =
+      '<table><thead><tr><th style="width:48%;">Course / Grade</th><th>Status at <span style="font-family:var(--mono)">' + code + '</span></th></tr></thead>' +
+      '<tbody>' + rows.map(r => '<tr><td>' + r[0] + '</td><td class="status">' + r[1] + '</td></tr>').join('') + '</tbody></table>';
+  }
+
+  updateRightPanel(null);
+
+  function tick(){
+    controls.update();
+    resize();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
